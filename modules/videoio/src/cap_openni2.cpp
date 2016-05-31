@@ -65,8 +65,10 @@
 
 #define CV_STREAM_TIMEOUT 2000
 
-#define CV_DEPTH_STREAM 0
-#define CV_COLOR_STREAM 1
+#define CV_DEPTH_STREAM     0
+#define CV_COLOR_STREAM     1
+#define CV_IR_STREAM        2
+#define CV_MAX_NUM_STREAMS  3
 
 #include "OpenNI.h"
 #include "PS1080.h"
@@ -113,6 +115,7 @@ protected:
 
     static openni::VideoMode defaultColorOutputMode();
     static openni::VideoMode defaultDepthOutputMode();
+    static openni::VideoMode defaultIrOutputMode();
 
     IplImage* retrieveDepthMap();
     IplImage* retrievePointCloudMap();
@@ -137,9 +140,9 @@ protected:
     openni::Recorder recorder;
 
     // Data generators with its metadata
-    openni::VideoStream depth, color, **streams;
-    openni::VideoFrameRef depthFrame, colorFrame;
-    cv::Mat depthImage, colorImage;
+    openni::VideoStream depth, color, ir, **streams;
+    openni::VideoFrameRef depthFrame, colorFrame, irFrame;
+    cv::Mat depthImage, colorImage, irImage;
 
     int maxBufferSize, maxTimeDuration; // for approx sync
     bool isCircleBuffer;
@@ -195,6 +198,15 @@ openni::VideoMode CvCapture_OpenNI2::defaultDepthOutputMode()
     return mode;
 }
 
+openni::VideoMode CvCapture_OpenNI2::defaultIrOutputMode()
+{
+    openni::VideoMode mode;
+    mode.setResolution(640, 480);
+    mode.setFps(30);
+    mode.setPixelFormat(openni::PIXEL_FORMAT_GRAY8);
+    return mode;
+}
+
 CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
 {
     numStream = 2;
@@ -216,8 +228,9 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
     }
 
     // Asus XTION and Occipital Structure Sensor do not have an image generator
+    bool createColorStream = true;
     if (deviceType == DEVICE_ASUS_XTION)
-        numStream = 1;
+	    createColorStream = false;
 
     if( deviceType > DEVICE_MAX )
         return;
@@ -272,7 +285,7 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
         return;
     }
 
-    streams = new openni::VideoStream*[numStream];
+    streams = new openni::VideoStream*[CV_MAX_NUM_STREAMS];
     streams[CV_DEPTH_STREAM] = &depth;
 
     // create a color object
@@ -293,18 +306,42 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
         }
         streams[CV_COLOR_STREAM] = &color;
     }
-    else if (numStream == 2)
+    else if (createColorStream)
     {
         CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't find color stream: %s\n", openni::OpenNI::getExtendedError()));
         return;
     }
 
-    if( !readCamerasParams() )
+    // create an IR object
+    status = ir.create(device, openni::SENSOR_IR);
+    if (status == openni::STATUS_OK)
     {
-        CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Could not read cameras parameters\n"));
-        return;
+	    // Set map output mode.
+	    if (ir.isValid())
+	    {
+		    CV_Assert(ir.setVideoMode(defaultIrOutputMode()) == openni::STATUS_OK);
+	    }
+	    status = ir.start();
+	    if (status != openni::STATUS_OK)
+	    {
+		    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't start IR stream: %s\n", openni::OpenNI::getExtendedError()));
+		    ir.destroy();
+		    return;
+	    }
+	    else
+		    streams[CV_IR_STREAM] = &ir;
+    }
+    else
+    {
+	    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't find IR stream: %s\n", openni::OpenNI::getExtendedError()));
+	    return;
     }
 
+    if (!readCamerasParams())
+    {
+	    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Could not read cameras parameters\n"));
+	    return;
+    }
 //    if( deviceType == DEVICE_ASUS_XTION )
 //    {
 //        //ps/asus specific
@@ -363,8 +400,10 @@ CvCapture_OpenNI2::~CvCapture_OpenNI2()
 {
     this->depthFrame.release();
     this->colorFrame.release();
+    this->irFrame.release();
     this->depth.stop();
     this->color.stop();
+    this->ir.stop();
     openni::OpenNI::shutdown();
 }
 
@@ -499,6 +538,7 @@ bool CvCapture_OpenNI2::setCommonProperty( int propIdx, double propValue )
         bool mirror = propValue > 0.0 ? true : false;
         isSet = color.setMirroringEnabled(mirror) == openni::STATUS_OK;
         isSet = depth.setMirroringEnabled(mirror) == openni::STATUS_OK;
+        isSet = ir.setMirroringEnabled(mirror) == openni::STATUS_OK;
     }
         break;
     // There is a set of properties that correspond to depth generator by default
@@ -718,6 +758,8 @@ bool CvCapture_OpenNI2::grabFrame()
         depth.readFrame(&depthFrame);
     if (color.isValid())
         color.readFrame(&colorFrame);
+    if (ir.isValid())
+	    ir.readFrame(&irFrame);
     isGrabbed = true;
 
     return isGrabbed;
