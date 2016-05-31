@@ -124,6 +124,7 @@ protected:
     IplImage* retrieveValidDepthMask();
     IplImage* retrieveBGRImage();
     IplImage* retrieveGrayImage();
+    IplImage* retrieveIrImage();
 
     bool readCamerasParams();
 
@@ -892,6 +893,16 @@ inline void getBGRImageFromMetaData( const openni::VideoFrameRef& imageMetaData,
    cv::cvtColor(bufferImage, bgrImage, cv::COLOR_RGB2BGR);
 }
 
+inline void getGrayImageFromMetaData(const openni::VideoFrameRef& imageMetaData, cv::Mat& grayImage)
+{
+    cv::Mat bufferImage;
+    if (imageMetaData.getVideoMode().getPixelFormat() != openni::PIXEL_FORMAT_GRAY8)
+        CV_Error(CV_StsUnsupportedFormat, "Unsupported format of grabbed image\n");
+
+    grayImage.create(imageMetaData.getHeight(), imageMetaData.getWidth(), CV_8UC1);
+    grayImage.data = (uchar*)imageMetaData.getData();
+}
+
 IplImage* CvCapture_OpenNI2::retrieveBGRImage()
 {
     if( !color.isValid() )
@@ -914,6 +925,16 @@ IplImage* CvCapture_OpenNI2::retrieveGrayImage()
     cv::cvtColor( rgbImage, outputMaps[CV_CAP_OPENNI_GRAY_IMAGE].mat, CV_BGR2GRAY );
 
     return outputMaps[CV_CAP_OPENNI_GRAY_IMAGE].getIplImagePtr();
+}
+
+IplImage* CvCapture_OpenNI2::retrieveIrImage()
+{
+    if (!ir.isValid())
+        return 0;
+
+    getGrayImageFromMetaData(irFrame, outputMaps[CV_CAP_OPENNI_IR_IMAGE].mat);
+
+    return outputMaps[CV_CAP_OPENNI_IR_IMAGE].getIplImagePtr();
 }
 
 IplImage* CvCapture_OpenNI2::retrieveFrame( int outputType )
@@ -948,6 +969,10 @@ IplImage* CvCapture_OpenNI2::retrieveFrame( int outputType )
     else if( outputType == CV_CAP_OPENNI_GRAY_IMAGE )
     {
         image = retrieveGrayImage();
+    }
+    else if( outputType == CV_CAP_OPENNI_IR_IMAGE )
+    {
+        image = retrieveIrImage();
     }
 
     return image;

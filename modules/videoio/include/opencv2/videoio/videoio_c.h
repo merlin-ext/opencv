@@ -454,7 +454,10 @@ enum
 
     // Data given from RGB image generator.
     CV_CAP_OPENNI_BGR_IMAGE                 = 5,
-    CV_CAP_OPENNI_GRAY_IMAGE                = 6
+    CV_CAP_OPENNI_GRAY_IMAGE                = 6,
+
+    // Data given from IR image generator.
+    CV_CAP_OPENNI_IR_IMAGE                  = 7
 };
 
 // Supported output modes of OpenNI image generator
