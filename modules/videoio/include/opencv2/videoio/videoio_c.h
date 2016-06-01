@@ -473,14 +473,6 @@ enum
     CV_CAP_OPENNI_QVGA_60HZ    = 4
 };
 
-// Supported streams for OpenNI
-enum
-{
-    CV_CAP_OPENNI2_STREAM_DEPTH  = 1,
-    CV_CAP_OPENNI2_STREAM_RGB    = 1 << 1,
-    CV_CAP_OPENNI2_STREAM_IR     = 1 << 2
-};
-
 enum
 {
     CV_CAP_INTELPERC_DEPTH_MAP              = 0, // Each pixel is a 16-bit integer. The value indicates the distance from an object to the camera's XY plane or the Cartesian depth.
