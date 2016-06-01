@@ -204,7 +204,10 @@ enum { CAP_OPENNI_DEPTH_MAP         = 0, // Depth values in mm (CV_16UC1)
 
        // Data given from RGB image generator
        CAP_OPENNI_BGR_IMAGE         = 5,
-       CAP_OPENNI_GRAY_IMAGE        = 6
+       CAP_OPENNI_GRAY_IMAGE        = 6,
+
+       // Data given from IR image generator
+       CAP_OPENNI_IR_IMAGE          = 7
      };
 
 // Supported output modes of OpenNI image generator

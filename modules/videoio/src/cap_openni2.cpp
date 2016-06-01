@@ -111,7 +111,7 @@ protected:
         IplImage iplHeader;
     };
 
-    static const int outputMapsTypesCount = 7;
+    static const int outputMapsTypesCount = 8;
 
     static openni::VideoMode defaultStreamOutputMode(int stream);
 
@@ -979,12 +979,20 @@ inline void getBGRImageFromMetaData( const openni::VideoFrameRef& imageMetaData,
 
 inline void getGrayImageFromMetaData(const openni::VideoFrameRef& imageMetaData, cv::Mat& grayImage)
 {
-    cv::Mat bufferImage;
-    if (imageMetaData.getVideoMode().getPixelFormat() != openni::PIXEL_FORMAT_GRAY8)
+    if (imageMetaData.getVideoMode().getPixelFormat() == openni::PIXEL_FORMAT_GRAY8)
+    {
+        grayImage.create(imageMetaData.getHeight(), imageMetaData.getWidth(), CV_8UC1);
+        grayImage.data = (uchar*)imageMetaData.getData();
+    }
+    else if (imageMetaData.getVideoMode().getPixelFormat() == openni::PIXEL_FORMAT_GRAY16)
+    {
+        grayImage.create(imageMetaData.getHeight(), imageMetaData.getWidth(), CV_16UC1);
+        grayImage.data = (uchar*)imageMetaData.getData();
+    }
+    else
+    {
         CV_Error(CV_StsUnsupportedFormat, "Unsupported format of grabbed image\n");
-
-    grayImage.create(imageMetaData.getHeight(), imageMetaData.getWidth(), CV_8UC1);
-    grayImage.data = (uchar*)imageMetaData.getData();
+    }
 }
 
 IplImage* CvCapture_OpenNI2::retrieveBGRImage()

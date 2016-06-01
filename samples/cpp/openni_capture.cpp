@@ -227,8 +227,19 @@ int main( int argc, char* argv[] )
     else
     {
         cout << "\nDevice doesn't contain image generator." << endl;
-        if (!retrievedImageFlags[0] && !retrievedImageFlags[1] && !retrievedImageFlags[2])
-            return 0;
+    }
+
+    if( capture.get(CAP_OPENNI_IR_GENERATOR_PRESENT) )
+    {
+        cout <<
+            "\nIR generator output mode:" << endl <<
+            "FRAME_WIDTH   " << capture.get(CAP_OPENNI_IR_GENERATOR + CAP_PROP_FRAME_WIDTH) << endl <<
+            "FRAME_HEIGHT  " << capture.get(CAP_OPENNI_IR_GENERATOR + CAP_PROP_FRAME_HEIGHT) << endl <<
+            "FPS           " << capture.get(CAP_OPENNI_IR_GENERATOR + CAP_PROP_FPS) << endl;
+    }
+    else
+    {
+        cout << "\nDevice doesn't contain IR generator." << endl;
     }
 
     for(;;)
@@ -238,6 +249,7 @@ int main( int argc, char* argv[] )
         Mat disparityMap;
         Mat bgrImage;
         Mat grayImage;
+        Mat irImage;
 
         if( !capture.grab() )
         {
@@ -277,6 +289,13 @@ int main( int argc, char* argv[] )
 
             if( retrievedImageFlags[4] && capture.retrieve( grayImage, CAP_OPENNI_GRAY_IMAGE ) )
                 imshow( "gray image", grayImage );
+
+            if( retrievedImageFlags[5] && capture.retrieve( irImage, CAP_OPENNI_IR_IMAGE ) )
+            {
+                Mat ir8;
+                irImage.convertTo(ir8, CV_8U, 256.0 / 3500, 0.0);
+                imshow("IR image", ir8);
+            }
         }
 
         if( waitKey( 30 ) >= 0 )
