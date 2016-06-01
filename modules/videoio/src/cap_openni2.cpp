@@ -185,13 +185,13 @@ openni::VideoMode CvCapture_OpenNI2::defaultStreamOutputMode(int stream)
     mode.setFps(30);
     switch (stream)
     {
-    case CV_CAP_OPENNI2_STREAM_DEPTH:
+    case CV_DEPTH_STREAM:
         mode.setPixelFormat(openni::PIXEL_FORMAT_DEPTH_1_MM);
         break;
-    case CV_CAP_OPENNI2_STREAM_RGB:
+    case CV_COLOR_STREAM:
         mode.setPixelFormat(openni::PIXEL_FORMAT_RGB888);
         break;
-    case CV_CAP_OPENNI2_STREAM_IR:
+    case CV_IR_STREAM:
         mode.setPixelFormat(openni::PIXEL_FORMAT_GRAY16);
         break;
     }
@@ -279,14 +279,21 @@ openni::Status CvCapture_OpenNI2::reopenStreams()
         "IR"
     };
 
+    static const openni::SensorType stream_sensor_types[CV_MAX_NUM_STREAMS] = {
+        openni::SENSOR_DEPTH,
+        openni::SENSOR_COLOR,
+        openni::SENSOR_IR
+    };
+
     for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i)
     {
         int stream = 1 << i; // see CV_CAP_OPENNI2_STEAM_DEPTH etc
         if (wantedStreams & stream) // want to open stream
         {
-            status = streams[i].create(device, openni::SENSOR_DEPTH);
+            status = streams[i].create(device, stream_sensor_types[i]);
             if (status == openni::STATUS_OK)
             {
+                // set video mode
                 status = streams[i].setVideoMode(defaultStreamOutputMode(i)); // xn::DepthGenerator supports VGA only! (Jan 2011)
                 if (status != openni::STATUS_OK)
                 {
@@ -295,6 +302,7 @@ openni::Status CvCapture_OpenNI2::reopenStreams()
                     return status;
                 }
 
+                // start stream
                 status = streams[i].start();
                 if (status != openni::STATUS_OK)
                 {
@@ -682,7 +690,7 @@ bool CvCapture_OpenNI2::setImageGeneratorProperty(int propIdx, double propValue)
         {
         case CV_CAP_PROP_OPENNI_OUTPUT_MODE :
         {
-            openni::VideoMode mode = streamFrames[CV_COLOR_STREAM].getVideoMode();
+            openni::VideoMode mode = streams[CV_COLOR_STREAM].getVideoMode();
 
             switch( cvRound(propValue) )
             {
