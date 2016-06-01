@@ -113,9 +113,7 @@ protected:
 
     static const int outputMapsTypesCount = 7;
 
-    static openni::VideoMode defaultColorOutputMode();
-    static openni::VideoMode defaultDepthOutputMode();
-    static openni::VideoMode defaultIrOutputMode();
+    static openni::VideoMode defaultStreamOutputMode(int stream);
 
     IplImage* retrieveDepthMap();
     IplImage* retrievePointCloudMap();
@@ -126,6 +124,7 @@ protected:
     IplImage* retrieveGrayImage();
     IplImage* retrieveIrImage();
 
+    openni::Status reopenStreams();
     bool readCamerasParams();
 
     double getDepthGeneratorProperty(int propIdx) const;
@@ -141,9 +140,9 @@ protected:
     openni::Recorder recorder;
 
     // Data generators with its metadata
-    openni::VideoStream depth, color, ir, **streams;
-    openni::VideoFrameRef depthFrame, colorFrame, irFrame;
-    cv::Mat depthImage, colorImage, irImage;
+    openni::VideoStream streams[CV_MAX_NUM_STREAMS];
+    openni::VideoFrameRef streamFrames[CV_MAX_NUM_STREAMS];
+    cv::Mat streamImages[CV_MAX_NUM_STREAMS];
 
     int maxBufferSize, maxTimeDuration; // for approx sync
     bool isCircleBuffer;
@@ -161,9 +160,7 @@ protected:
     // The value for pixels without a valid disparity measurement
     int noSampleValue;
 
-    int currentStream;
-
-    int numStream;
+    int wantedStreams;
     std::vector<OutputMap> outputMaps;
 };
 
@@ -181,36 +178,28 @@ bool CvCapture_OpenNI2::isOpened() const
     return isContextOpened;
 }
 
-openni::VideoMode CvCapture_OpenNI2::defaultColorOutputMode()
+openni::VideoMode CvCapture_OpenNI2::defaultStreamOutputMode(int stream)
 {
     openni::VideoMode mode;
     mode.setResolution(640, 480);
     mode.setFps(30);
-    mode.setPixelFormat(openni::PIXEL_FORMAT_RGB888);
-    return mode;
-}
-
-openni::VideoMode CvCapture_OpenNI2::defaultDepthOutputMode()
-{
-    openni::VideoMode mode;
-    mode.setResolution(640, 480);
-    mode.setFps(30);
-    mode.setPixelFormat(openni::PIXEL_FORMAT_DEPTH_1_MM);
-    return mode;
-}
-
-openni::VideoMode CvCapture_OpenNI2::defaultIrOutputMode()
-{
-    openni::VideoMode mode;
-    mode.setResolution(640, 480);
-    mode.setFps(30);
-    mode.setPixelFormat(openni::PIXEL_FORMAT_GRAY8);
+    switch (stream)
+    {
+    case CV_CAP_OPENNI2_STREAM_DEPTH:
+        mode.setPixelFormat(openni::PIXEL_FORMAT_DEPTH_1_MM);
+        break;
+    case CV_CAP_OPENNI2_STREAM_RGB:
+        mode.setPixelFormat(openni::PIXEL_FORMAT_RGB888);
+        break;
+    case CV_CAP_OPENNI2_STREAM_IR:
+        mode.setPixelFormat(openni::PIXEL_FORMAT_GRAY16);
+        break;
+    }
     return mode;
 }
 
 CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
 {
-    numStream = 2;
     const char* deviceURI = openni::ANY_DEVICE;
     openni::Status status;
     int deviceType = DEVICE_DEFAULT;
@@ -229,12 +218,9 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
     }
 
     // Asus XTION and Occipital Structure Sensor do not have an image generator
-    bool createColorStream = true;
+    wantedStreams = CV_CAP_OPENNI2_STREAM_DEPTH | CV_CAP_OPENNI2_STREAM_RGB;
     if (deviceType == DEVICE_ASUS_XTION)
-	    createColorStream = false;
-
-    if( deviceType > DEVICE_MAX )
-        return;
+        wantedStreams &= ~CV_CAP_OPENNI2_STREAM_RGB;
 
     // Initialize and configure the context.
     status = openni::OpenNI::initialize();
@@ -261,81 +247,11 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
         return;
     }
 
-    //device.setDepthColorSyncEnabled(true);
-
-
-    status = depth.create(device, openni::SENSOR_DEPTH);
-    if (status == openni::STATUS_OK)
+    status = reopenStreams();
+    if (status != openni::STATUS_OK)
     {
-        if (depth.isValid())
-        {
-            CV_Assert(depth.setVideoMode(defaultDepthOutputMode()) == openni::STATUS_OK); // xn::DepthGenerator supports VGA only! (Jan 2011)
-        }
-
-        status = depth.start();
-        if (status != openni::STATUS_OK)
-        {
-            CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't start depth stream: %s\n", openni::OpenNI::getExtendedError()));
-            depth.destroy();
-            return;
-        }
-    }
-    else
-    {
-        CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't find depth stream:: %s\n", openni::OpenNI::getExtendedError()));
+        openni::OpenNI::shutdown();
         return;
-    }
-
-    streams = new openni::VideoStream*[CV_MAX_NUM_STREAMS];
-    streams[CV_DEPTH_STREAM] = &depth;
-
-    // create a color object
-    status = color.create(device, openni::SENSOR_COLOR);
-    if (status == openni::STATUS_OK)
-    {
-        // Set map output mode.
-        if (color.isValid())
-        {
-            CV_Assert(color.setVideoMode(defaultColorOutputMode()) == openni::STATUS_OK);
-        }
-        status = color.start();
-        if (status != openni::STATUS_OK)
-        {
-            CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't start color stream: %s\n", openni::OpenNI::getExtendedError()));
-            color.destroy();
-            return;
-        }
-        streams[CV_COLOR_STREAM] = &color;
-    }
-    else if (createColorStream)
-    {
-        CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't find color stream: %s\n", openni::OpenNI::getExtendedError()));
-        return;
-    }
-
-    // create an IR object
-    status = ir.create(device, openni::SENSOR_IR);
-    if (status == openni::STATUS_OK)
-    {
-	    // Set map output mode.
-	    if (ir.isValid())
-	    {
-		    CV_Assert(ir.setVideoMode(defaultIrOutputMode()) == openni::STATUS_OK);
-	    }
-	    status = ir.start();
-	    if (status != openni::STATUS_OK)
-	    {
-		    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't start IR stream: %s\n", openni::OpenNI::getExtendedError()));
-		    ir.destroy();
-		    return;
-	    }
-	    else
-		    streams[CV_IR_STREAM] = &ir;
-    }
-    else
-    {
-	    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't find IR stream: %s\n", openni::OpenNI::getExtendedError()));
-	    return;
     }
 
     if (!readCamerasParams())
@@ -343,13 +259,6 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
 	    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Could not read cameras parameters\n"));
 	    return;
     }
-//    if( deviceType == DEVICE_ASUS_XTION )
-//    {
-//        //ps/asus specific
-//        imageGenerator.SetIntProperty("InputFormat", 1 /*XN_IO_IMAGE_FORMAT_YUV422*/);
-//        imageGenerator.SetPixelFormat(XN_PIXEL_FORMAT_RGB24);
-//        depthGenerator.SetIntProperty("RegistrationType", 1 /*XN_PROCESSING_HARDWARE*/);
-//    }
 
 
     outputMaps.resize( outputMapsTypesCount );
@@ -359,9 +268,59 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
     setProperty(CV_CAP_PROP_OPENNI_REGISTRATION, 1.0);
 }
 
+openni::Status CvCapture_OpenNI2::reopenStreams()
+{
+    openni::Status status;
+
+    // for logging
+    static const char* stream_names[CV_MAX_NUM_STREAMS] = {
+        "depth",
+        "color",
+        "IR"
+    };
+
+    for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i)
+    {
+        int stream = 1 << i; // see CV_CAP_OPENNI2_STEAM_DEPTH etc
+        if (wantedStreams & stream) // want to open stream
+        {
+            status = streams[i].create(device, openni::SENSOR_DEPTH);
+            if (status == openni::STATUS_OK)
+            {
+                status = streams[i].setVideoMode(defaultStreamOutputMode(i)); // xn::DepthGenerator supports VGA only! (Jan 2011)
+                if (status != openni::STATUS_OK)
+                {
+                    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't set %s stream output mode: %s\n", stream_names[i], openni::OpenNI::getExtendedError()));
+                    streams[i].destroy();
+                    return status;
+                }
+
+                status = streams[i].start();
+                if (status != openni::STATUS_OK)
+                {
+                    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't start %s stream: %s\n", stream_names[i], openni::OpenNI::getExtendedError()));
+                    streams[i].destroy();
+                    return status;
+                }
+            }
+            else
+            {
+                CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Couldn't find %s stream:: %s\n", stream_names[i], openni::OpenNI::getExtendedError()));
+                return status;
+            }
+        }
+        else if (streams[i].isValid()) // want to close stream
+        {
+            streams[i].stop();
+            streams[i].destroy();
+        }
+    }
+
+    return openni::STATUS_OK;
+}
+
 CvCapture_OpenNI2::CvCapture_OpenNI2(const char * filename)
 {
-    numStream = 2;
     openni::Status status;
 
     isContextOpened = false;
@@ -386,6 +345,13 @@ CvCapture_OpenNI2::CvCapture_OpenNI2(const char * filename)
         return;
     }
 
+    status = reopenStreams();
+    if (status != openni::STATUS_OK)
+    {
+        openni::OpenNI::shutdown();
+        return;
+    }
+
     if( !readCamerasParams() )
     {
         CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Could not read cameras parameters\n"));
@@ -399,19 +365,20 @@ CvCapture_OpenNI2::CvCapture_OpenNI2(const char * filename)
 
 CvCapture_OpenNI2::~CvCapture_OpenNI2()
 {
-    this->depthFrame.release();
-    this->colorFrame.release();
-    this->irFrame.release();
-    this->depth.stop();
-    this->color.stop();
-    this->ir.stop();
+    for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i)
+    {
+        streamFrames[i].release();
+        streams[i].stop();
+        streams[i].destroy();
+    }
+    device.close();
     openni::OpenNI::shutdown();
 }
 
 bool CvCapture_OpenNI2::readCamerasParams()
 {
     double pixelSize = 0;
-    if (depth.getProperty<double>(XN_STREAM_PROPERTY_ZERO_PLANE_PIXEL_SIZE, &pixelSize) != openni::STATUS_OK)
+    if (streams[CV_DEPTH_STREAM].getProperty<double>(XN_STREAM_PROPERTY_ZERO_PLANE_PIXEL_SIZE, &pixelSize) != openni::STATUS_OK)
     {
         CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::readCamerasParams : Could not read pixel size!\n"));
         return false;
@@ -422,13 +389,13 @@ bool CvCapture_OpenNI2::readCamerasParams()
 
     // focal length of IR camera in pixels for VGA resolution
     int zeroPlanDistance; // in mm
-    if (depth.getProperty(XN_STREAM_PROPERTY_ZERO_PLANE_DISTANCE, &zeroPlanDistance) != openni::STATUS_OK)
+    if (streams[CV_DEPTH_STREAM].getProperty(XN_STREAM_PROPERTY_ZERO_PLANE_DISTANCE, &zeroPlanDistance) != openni::STATUS_OK)
     {
         CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::readCamerasParams : Could not read virtual plane distance!\n"));
         return false;
     }
 
-    if (depth.getProperty<double>(XN_STREAM_PROPERTY_EMITTER_DCMOS_DISTANCE, &baseline) != openni::STATUS_OK)
+    if (streams[CV_DEPTH_STREAM].getProperty<double>(XN_STREAM_PROPERTY_EMITTER_DCMOS_DISTANCE, &baseline) != openni::STATUS_OK)
     {
         CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::readCamerasParams : Could not read base line!\n"));
         return false;
@@ -517,10 +484,15 @@ double CvCapture_OpenNI2::getCommonProperty( int propIdx ) const
         propValue = const_cast<CvCapture_OpenNI2 *>(this)->device.getDepthColorSyncEnabled();
     case CV_CAP_PROP_OPENNI2_MIRROR:
     {
-        bool isMirroring = color.getMirroringEnabled() && depth.getMirroringEnabled();
+        bool isMirroring = false;
+        for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i)
+            isMirroring |= streams[i].getMirroringEnabled();
         propValue = isMirroring ? 1.0 : 0.0;
         break;
     }
+    case CV_CAP_PROP_OPENNI2_STREAM_SELECT:
+        propValue = wantedStreams;
+        break;
     default :
         CV_Error( CV_StsBadArg, cv::format("Such parameter (propIdx=%d) isn't supported for getting.\n", propIdx) );
     }
@@ -537,9 +509,11 @@ bool CvCapture_OpenNI2::setCommonProperty( int propIdx, double propValue )
     case CV_CAP_PROP_OPENNI2_MIRROR:
     {
         bool mirror = propValue > 0.0 ? true : false;
-        isSet = color.setMirroringEnabled(mirror) == openni::STATUS_OK;
-        isSet = depth.setMirroringEnabled(mirror) == openni::STATUS_OK;
-        isSet = ir.setMirroringEnabled(mirror) == openni::STATUS_OK;
+        for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i)
+        {
+            if (streams[i].isValid())
+                isSet |= streams[i].setMirroringEnabled(mirror) == openni::STATUS_OK;
+        }
     }
         break;
     // There is a set of properties that correspond to depth generator by default
@@ -550,6 +524,12 @@ bool CvCapture_OpenNI2::setCommonProperty( int propIdx, double propValue )
     case CV_CAP_PROP_OPENNI2_SYNC:
         isSet = device.setDepthColorSyncEnabled(propValue > 0.0) == openni::STATUS_OK;
         break;
+
+    case CV_CAP_PROP_OPENNI2_STREAM_SELECT:
+        wantedStreams = (int)propValue;
+        isSet = reopenStreams() == openni::STATUS_OK;
+        break;
+
     default:
         CV_Error( CV_StsBadArg, cv::format("Such parameter (propIdx=%d) isn't supported for setting.\n", propIdx) );
     }
@@ -560,7 +540,7 @@ bool CvCapture_OpenNI2::setCommonProperty( int propIdx, double propValue )
 double CvCapture_OpenNI2::getDepthGeneratorProperty( int propIdx ) const
 {
     double propValue = 0;
-    if( !depth.isValid() )
+    if( !streams[CV_DEPTH_STREAM].isValid() )
         return propValue;
 
     openni::VideoMode mode;
@@ -568,21 +548,21 @@ double CvCapture_OpenNI2::getDepthGeneratorProperty( int propIdx ) const
     switch( propIdx )
     {
     case CV_CAP_PROP_OPENNI_GENERATOR_PRESENT :
-        CV_DbgAssert(depth.isValid());
+        CV_DbgAssert(streams[CV_DEPTH_STREAM].isValid());
         propValue = 1.;
         break;
     case CV_CAP_PROP_FRAME_WIDTH :
-        propValue = depth.getVideoMode().getResolutionX();
+        propValue = streams[CV_DEPTH_STREAM].getVideoMode().getResolutionX();
         break;
     case CV_CAP_PROP_FRAME_HEIGHT :
-            propValue = depth.getVideoMode().getResolutionY();
+            propValue = streams[CV_DEPTH_STREAM].getVideoMode().getResolutionY();
         break;
     case CV_CAP_PROP_FPS :
-        mode = depth.getVideoMode();
+        mode = streams[CV_DEPTH_STREAM].getVideoMode();
         propValue = mode.getFps();
         break;
     case CV_CAP_PROP_OPENNI_FRAME_MAX_DEPTH :
-        propValue = depth.getMaxPixelValue();
+        propValue = streams[CV_DEPTH_STREAM].getMaxPixelValue();
         break;
     case CV_CAP_PROP_OPENNI_BASELINE :
         propValue = baseline;
@@ -594,10 +574,10 @@ double CvCapture_OpenNI2::getDepthGeneratorProperty( int propIdx ) const
         propValue = device.getImageRegistrationMode();
         break;
     case CV_CAP_PROP_POS_MSEC :
-        propValue = (double)depthFrame.getTimestamp();
+        propValue = (double)streamFrames[CV_DEPTH_STREAM].getTimestamp();
         break;
     case CV_CAP_PROP_POS_FRAMES :
-        propValue = depthFrame.getFrameIndex();
+        propValue = streamFrames[CV_DEPTH_STREAM].getFrameIndex();
         break;
     default :
         CV_Error( CV_StsBadArg, cv::format("Depth generator does not support such parameter (propIdx=%d) for getting.\n", propIdx) );
@@ -610,7 +590,7 @@ bool CvCapture_OpenNI2::setDepthGeneratorProperty( int propIdx, double propValue
 {
     bool isSet = false;
 
-    CV_Assert( depth.isValid() );
+    CV_Assert(streams[CV_DEPTH_STREAM].isValid() );
 
     switch( propIdx )
     {
@@ -620,7 +600,7 @@ bool CvCapture_OpenNI2::setDepthGeneratorProperty( int propIdx, double propValue
             {
                 // if there isn't image generator (i.e. ASUS XtionPro doesn't have it)
                 // then the property isn't avaliable
-                if ( color.isValid() )
+                if ( streams[CV_COLOR_STREAM].isValid() )
                 {
                     openni::ImageRegistrationMode mode = propValue != 0.0 ? openni::IMAGE_REGISTRATION_DEPTH_TO_COLOR : openni::IMAGE_REGISTRATION_OFF;
                     if( !device.getImageRegistrationMode() == mode )
@@ -660,30 +640,30 @@ bool CvCapture_OpenNI2::setDepthGeneratorProperty( int propIdx, double propValue
 double CvCapture_OpenNI2::getImageGeneratorProperty( int propIdx ) const
 {
     double propValue = 0.;
-    if( !color.isValid() )
+    if( !streams[CV_COLOR_STREAM].isValid() )
         return propValue;
 
     openni::VideoMode mode;
     switch( propIdx )
     {
     case CV_CAP_PROP_OPENNI_GENERATOR_PRESENT :
-        CV_DbgAssert( color.isValid() );
+        CV_DbgAssert(streams[CV_COLOR_STREAM].isValid() );
         propValue = 1.;
         break;
     case CV_CAP_PROP_FRAME_WIDTH :
-            propValue = color.getVideoMode().getResolutionX();
+            propValue = streams[CV_COLOR_STREAM].getVideoMode().getResolutionX();
         break;
     case CV_CAP_PROP_FRAME_HEIGHT :
-            propValue = color.getVideoMode().getResolutionY();
+            propValue = streams[CV_COLOR_STREAM].getVideoMode().getResolutionY();
         break;
     case CV_CAP_PROP_FPS :
-            propValue = color.getVideoMode().getFps();
+            propValue = streams[CV_COLOR_STREAM].getVideoMode().getFps();
         break;
     case CV_CAP_PROP_POS_MSEC :
-        propValue = (double)colorFrame.getTimestamp();
+        propValue = (double)streamFrames[CV_COLOR_STREAM].getTimestamp();
         break;
     case CV_CAP_PROP_POS_FRAMES :
-        propValue = (double)colorFrame.getFrameIndex();
+        propValue = (double)streamFrames[CV_COLOR_STREAM].getFrameIndex();
         break;
     default :
         CV_Error( CV_StsBadArg, cv::format("Image generator does not support such parameter (propIdx=%d) for getting.\n", propIdx) );
@@ -695,14 +675,14 @@ double CvCapture_OpenNI2::getImageGeneratorProperty( int propIdx ) const
 bool CvCapture_OpenNI2::setImageGeneratorProperty(int propIdx, double propValue)
 {
     bool isSet = false;
-        if( !color.isValid() )
+        if( !streams[CV_COLOR_STREAM].isValid() )
             return isSet;
 
         switch( propIdx )
         {
         case CV_CAP_PROP_OPENNI_OUTPUT_MODE :
         {
-            openni::VideoMode mode = color.getVideoMode();
+            openni::VideoMode mode = streamFrames[CV_COLOR_STREAM].getVideoMode();
 
             switch( cvRound(propValue) )
             {
@@ -730,7 +710,7 @@ bool CvCapture_OpenNI2::setImageGeneratorProperty(int propIdx, double propValue)
                 CV_Error( CV_StsBadArg, "Unsupported image generator output mode.\n");
             }
 
-            openni::Status status = color.setVideoMode( mode );
+            openni::Status status = streams[CV_COLOR_STREAM].setVideoMode( mode );
             if( status != openni::STATUS_OK )
                 CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::setImageGeneratorProperty : %s\n", openni::OpenNI::getExtendedError()));
             else
@@ -751,16 +731,17 @@ bool CvCapture_OpenNI2::grabFrame()
 
     bool isGrabbed = false;
 
-    openni::Status status = openni::OpenNI::waitForAnyStream(streams, numStream, &currentStream, CV_STREAM_TIMEOUT);
+    openni::VideoStream* streamPtrs[CV_MAX_NUM_STREAMS] = { &streams[0], &streams[1], &streams[2] };
+    int currentStream;
+    openni::Status status = openni::OpenNI::waitForAnyStream(streamPtrs, CV_MAX_NUM_STREAMS, &currentStream, CV_STREAM_TIMEOUT);
     if( status != openni::STATUS_OK )
         return false;
 
-    if( depth.isValid() )
-        depth.readFrame(&depthFrame);
-    if (color.isValid())
-        color.readFrame(&colorFrame);
-    if (ir.isValid())
-	    ir.readFrame(&irFrame);
+    for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i)
+    {
+        if (streams[i].isValid())
+            streams[i].readFrame(&streamFrames[i]);
+    }
     isGrabbed = true;
 
     return isGrabbed;
@@ -779,25 +760,25 @@ inline void getDepthMapFromMetaData(const openni::VideoFrameRef& depthMetaData, 
 
 IplImage* CvCapture_OpenNI2::retrieveDepthMap()
 {
-    if( !depth.isValid() )
+    if( !streamFrames[CV_DEPTH_STREAM].isValid() )
         return 0;
 
-    getDepthMapFromMetaData( depthFrame, outputMaps[CV_CAP_OPENNI_DEPTH_MAP].mat, noSampleValue, shadowValue );
+    getDepthMapFromMetaData(streamFrames[CV_DEPTH_STREAM], outputMaps[CV_CAP_OPENNI_DEPTH_MAP].mat, noSampleValue, shadowValue );
 
     return outputMaps[CV_CAP_OPENNI_DEPTH_MAP].getIplImagePtr();
 }
 
 IplImage* CvCapture_OpenNI2::retrievePointCloudMap()
 {
-    if( !depthFrame.isValid() )
+    if( !streamFrames[CV_DEPTH_STREAM].isValid() )
         return 0;
 
     cv::Mat depthImg;
-    getDepthMapFromMetaData(depthFrame, depthImg, noSampleValue, shadowValue);
+    getDepthMapFromMetaData(streamFrames[CV_DEPTH_STREAM], depthImg, noSampleValue, shadowValue);
 
     const int badPoint = INVALID_PIXEL_VAL;
     const float badCoord = INVALID_COORDINATE_VAL;
-    int cols = depthFrame.getWidth(), rows = depthFrame.getHeight();
+    int cols = streamFrames[CV_DEPTH_STREAM].getWidth(), rows = streamFrames[CV_DEPTH_STREAM].getHeight();
     cv::Mat pointCloud_XYZ( rows, cols, CV_32FC3, cv::Scalar::all(badPoint) );
 
     float worldX, worldY, worldZ;
@@ -805,7 +786,7 @@ IplImage* CvCapture_OpenNI2::retrievePointCloudMap()
     {
         for (int x = 0; x < cols; x++)
         {
-            openni::CoordinateConverter::convertDepthToWorld(depth, x, y, depthImg.at<unsigned short>(y, x), &worldX, &worldY, &worldZ);
+            openni::CoordinateConverter::convertDepthToWorld(streams[CV_DEPTH_STREAM], x, y, depthImg.at<unsigned short>(y, x), &worldX, &worldY, &worldZ);
 
             if (depthImg.at<unsigned short>(y, x) == badPoint) // not valid
                 pointCloud_XYZ.at<cv::Point3f>(y, x) = cv::Point3f(badCoord, badCoord, badCoord);
@@ -846,11 +827,11 @@ static void computeDisparity_32F( const openni::VideoFrameRef& depthMetaData, cv
 
 IplImage* CvCapture_OpenNI2::retrieveDisparityMap()
 {
-    if (!depthFrame.isValid())
+    if (!streamFrames[CV_DEPTH_STREAM].isValid())
         return 0;
 
     cv::Mat disp32;
-    computeDisparity_32F(depthFrame, disp32, baseline, depthFocalLength_VGA, noSampleValue, shadowValue);
+    computeDisparity_32F(streamFrames[CV_DEPTH_STREAM], disp32, baseline, depthFocalLength_VGA, noSampleValue, shadowValue);
 
     disp32.convertTo( outputMaps[CV_CAP_OPENNI_DISPARITY_MAP].mat, CV_8UC1 );
 
@@ -859,21 +840,21 @@ IplImage* CvCapture_OpenNI2::retrieveDisparityMap()
 
 IplImage* CvCapture_OpenNI2::retrieveDisparityMap_32F()
 {
-    if (!depthFrame.isValid())
+    if (!streamFrames[CV_DEPTH_STREAM].isValid())
         return 0;
 
-    computeDisparity_32F(depthFrame, outputMaps[CV_CAP_OPENNI_DISPARITY_MAP_32F].mat, baseline, depthFocalLength_VGA, noSampleValue, shadowValue);
+    computeDisparity_32F(streamFrames[CV_DEPTH_STREAM], outputMaps[CV_CAP_OPENNI_DISPARITY_MAP_32F].mat, baseline, depthFocalLength_VGA, noSampleValue, shadowValue);
 
     return outputMaps[CV_CAP_OPENNI_DISPARITY_MAP_32F].getIplImagePtr();
 }
 
 IplImage* CvCapture_OpenNI2::retrieveValidDepthMask()
 {
-    if (!depthFrame.isValid())
+    if (!streamFrames[CV_DEPTH_STREAM].isValid())
         return 0;
 
     cv::Mat d;
-    getDepthMapFromMetaData(depthFrame, d, noSampleValue, shadowValue);
+    getDepthMapFromMetaData(streamFrames[CV_DEPTH_STREAM], d, noSampleValue, shadowValue);
 
     outputMaps[CV_CAP_OPENNI_VALID_DEPTH_MASK].mat = d != CvCapture_OpenNI2::INVALID_PIXEL_VAL;
 
@@ -905,23 +886,23 @@ inline void getGrayImageFromMetaData(const openni::VideoFrameRef& imageMetaData,
 
 IplImage* CvCapture_OpenNI2::retrieveBGRImage()
 {
-    if( !color.isValid() )
+    if( !streamFrames[CV_COLOR_STREAM].isValid() )
         return 0;
 
-    getBGRImageFromMetaData( colorFrame, outputMaps[CV_CAP_OPENNI_BGR_IMAGE].mat );
+    getBGRImageFromMetaData(streamFrames[CV_COLOR_STREAM], outputMaps[CV_CAP_OPENNI_BGR_IMAGE].mat );
 
     return outputMaps[CV_CAP_OPENNI_BGR_IMAGE].getIplImagePtr();
 }
 
 IplImage* CvCapture_OpenNI2::retrieveGrayImage()
 {
-    if (!colorFrame.isValid())
+    if (!streamFrames[CV_COLOR_STREAM].isValid())
         return 0;
 
-    CV_Assert(colorFrame.getVideoMode().getPixelFormat() == openni::PIXEL_FORMAT_RGB888); // RGB
+    CV_Assert(streamFrames[CV_COLOR_STREAM].getVideoMode().getPixelFormat() == openni::PIXEL_FORMAT_RGB888); // RGB
 
     cv::Mat rgbImage;
-    getBGRImageFromMetaData(colorFrame, rgbImage);
+    getBGRImageFromMetaData(streamFrames[CV_COLOR_STREAM], rgbImage);
     cv::cvtColor( rgbImage, outputMaps[CV_CAP_OPENNI_GRAY_IMAGE].mat, CV_BGR2GRAY );
 
     return outputMaps[CV_CAP_OPENNI_GRAY_IMAGE].getIplImagePtr();
@@ -929,10 +910,10 @@ IplImage* CvCapture_OpenNI2::retrieveGrayImage()
 
 IplImage* CvCapture_OpenNI2::retrieveIrImage()
 {
-    if (!ir.isValid())
+    if (!streamFrames[CV_IR_STREAM].isValid())
         return 0;
 
-    getGrayImageFromMetaData(irFrame, outputMaps[CV_CAP_OPENNI_IR_IMAGE].mat);
+    getGrayImageFromMetaData(streamFrames[CV_IR_STREAM], outputMaps[CV_CAP_OPENNI_IR_IMAGE].mat);
 
     return outputMaps[CV_CAP_OPENNI_IR_IMAGE].getIplImagePtr();
 }
