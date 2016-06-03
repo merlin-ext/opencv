@@ -255,8 +255,8 @@ CvCapture_OpenNI2::CvCapture_OpenNI2( int index )
 
     if (!readCamerasParams())
     {
-	    CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Could not read cameras parameters\n"));
-	    return;
+        CV_Error(CV_StsError, cv::format("CvCapture_OpenNI2::CvCapture_OpenNI2 : Could not read cameras parameters\n"));
+        return;
     }
 
 
