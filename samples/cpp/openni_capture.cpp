@@ -103,7 +103,7 @@ static void parseCommandLine( int argc, char* argv[], bool& isColorizeDisp, bool
                        string& filename, bool& isFileReading )
 {
     filename.clear();
-    cv::CommandLineParser parser(argc, argv, "{h help||}{cd|1|}{fmd|0|}{mode|0|}{m|010100|}{r||}");
+    cv::CommandLineParser parser(argc, argv, "{h help||}{cd|1|}{fmd|0|}{mode|-1|}{m|010100|}{r||}");
     if (parser.has("h"))
     {
         help();
@@ -167,7 +167,7 @@ int main( int argc, char* argv[] )
         return -1;
     }
 
-    if( !isVideoReading )
+    if( !isVideoReading && imageMode >= 0 )
     {
         bool modeRes=false;
         switch ( imageMode )
