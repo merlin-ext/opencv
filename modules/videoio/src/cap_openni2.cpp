@@ -834,9 +834,14 @@ bool CvCapture_OpenNI2::grabFrame()
 
     bool isGrabbed = false;
 
-    openni::VideoStream* streamPtrs[CV_MAX_NUM_STREAMS] = { &streams[0], &streams[1], &streams[2] };
+    int numActiveStreams = 0;
+    openni::VideoStream* streamPtrs[CV_MAX_NUM_STREAMS];
+    for (int i = 0; i < CV_MAX_NUM_STREAMS; ++i) {
+        streamPtrs[numActiveStreams++] = &streams[i];
+    }
+
     int currentStream;
-    openni::Status status = openni::OpenNI::waitForAnyStream(streamPtrs, CV_MAX_NUM_STREAMS, &currentStream, CV_STREAM_TIMEOUT);
+    openni::Status status = openni::OpenNI::waitForAnyStream(streamPtrs, numActiveStreams, &currentStream, CV_STREAM_TIMEOUT);
     if( status != openni::STATUS_OK )
         return false;
 

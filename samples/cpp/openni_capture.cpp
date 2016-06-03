@@ -210,12 +210,20 @@ int main( int argc, char* argv[] )
         capture.set(CAP_OPENNI_IR_GENERATOR_PRESENT, false);
 
     // Print some avalible device settings.
-    cout << "\nDepth generator output mode:" << endl <<
-            "FRAME_WIDTH      " << capture.get( CAP_PROP_FRAME_WIDTH ) << endl <<
-            "FRAME_HEIGHT     " << capture.get( CAP_PROP_FRAME_HEIGHT ) << endl <<
-            "FRAME_MAX_DEPTH  " << capture.get( CAP_PROP_OPENNI_FRAME_MAX_DEPTH ) << " mm" << endl <<
-            "FPS              " << capture.get( CAP_PROP_FPS ) << endl <<
-            "REGISTRATION     " << capture.get( CAP_PROP_OPENNI_REGISTRATION ) << endl;
+    if (capture.get(CAP_OPENNI_DEPTH_GENERATOR_PRESENT))
+    {
+        cout << "\nDepth generator output mode:" << endl <<
+            "FRAME_WIDTH      " << capture.get(CAP_PROP_FRAME_WIDTH) << endl <<
+            "FRAME_HEIGHT     " << capture.get(CAP_PROP_FRAME_HEIGHT) << endl <<
+            "FRAME_MAX_DEPTH  " << capture.get(CAP_PROP_OPENNI_FRAME_MAX_DEPTH) << " mm" << endl <<
+            "FPS              " << capture.get(CAP_PROP_FPS) << endl <<
+            "REGISTRATION     " << capture.get(CAP_PROP_OPENNI_REGISTRATION) << endl;
+    }
+    else
+    {
+        cout << "\nDevice doesn't contain depth generator or it is not selected." << endl;
+    }
+
     if( capture.get( CAP_OPENNI_IMAGE_GENERATOR_PRESENT ) )
     {
         cout <<
@@ -226,7 +234,7 @@ int main( int argc, char* argv[] )
     }
     else
     {
-        cout << "\nDevice doesn't contain image generator." << endl;
+        cout << "\nDevice doesn't contain image generator or it is not selected." << endl;
     }
 
     if( capture.get(CAP_OPENNI_IR_GENERATOR_PRESENT) )
@@ -239,7 +247,7 @@ int main( int argc, char* argv[] )
     }
     else
     {
-        cout << "\nDevice doesn't contain IR generator." << endl;
+        cout << "\nDevice doesn't contain IR generator or it is not selected." << endl;
     }
 
     for(;;)
