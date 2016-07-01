@@ -820,6 +820,9 @@ bool CvCapture_OpenNI2::setIrGeneratorProperty(int propIdx, double propValue)
             isSet = true;
         break;
     }
+    case CV_CAP_PROP_EXPOSURE:
+        isSet = streams[CV_IR_STREAM].setProperty(openni::STREAM_PROPERTY_EXPOSURE, (int)propValue) == openni::STATUS_OK;
+        break;
     default:
         CV_Error(CV_StsBadArg, cv::format("Image generator does not support such parameter (propIdx=%d) for setting.\n", propIdx));
     }
